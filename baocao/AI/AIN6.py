@@ -8,6 +8,7 @@ import platform
 import psutil
 import socket
 import getpass
+import openai
 
 import greeting
 import creator
@@ -17,6 +18,23 @@ import math_logic
 
 app = Flask(__name__)
 
+# ------------------ Cấu hình OpenAI ------------------
+openai.api_key = "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"  # Thay bằng API key của bạn
+
+def ask_openai(message):
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",  # hoặc "gpt-4"
+            messages=[{"role": "user", "content": message}],
+            temperature=0.7,
+            max_tokens=200
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        print("Lỗi OpenAI:", e)
+        return "Xin lỗi, hiện tại mình không thể trả lời bằng AI."
+
+# ------------------ Hàm xử lý văn bản ------------------
 def clean_text(text):
     return text.lower().strip()
 
@@ -27,11 +45,13 @@ training_sentences = [clean_text(s) for s in greeting.training_sentences
                       + bye.training_sentences]
 training_labels = greeting.training_labels + story.training_labels + creator.training_labels + bye.training_labels
 
+# Đồng bộ số lượng câu và nhãn
 if len(training_sentences) != len(training_labels):
     min_len = min(len(training_sentences), len(training_labels))
     training_sentences = training_sentences[:min_len]
     training_labels = training_labels[:min_len]
 
+# Gộp responses
 responses = {}
 responses.update(greeting.responses)
 responses.update(story.responses)
@@ -39,7 +59,7 @@ responses.update(creator.responses)
 responses.update(bye.responses)
 
 # ------------------ Hàm log câu chưa học ------------------
-def log_unlearned(sentence: str):
+def log_unlearned(sentence: str, label="unknown"):
     sentence = sentence.strip()
     if not sentence:
         return
@@ -49,11 +69,10 @@ def log_unlearned(sentence: str):
             f.write("DANH SÁCH CÂU CHƯA HỌC:\n")
     with open(file_path, "r", encoding="utf-8") as f:
         lines = f.read().splitlines()
-    # Lưu câu + nhãn tạm "unknown" nếu chưa tồn tại
     if not any(sentence in line for line in lines):
         with open(file_path, "a", encoding="utf-8") as f:
-            f.write(f"{sentence}||unknown\n")
-        print(f"📝 Đã lưu câu mới vào unlearned.txt: {sentence}")
+            f.write(f"{sentence}||{label}\n")
+        print(f"📝 Đã lưu câu mới vào unlearned.txt: {sentence}||{label}")
 
 # ------------------ Hàm nạp câu chưa học ------------------
 def load_unlearned():
@@ -63,19 +82,19 @@ def load_unlearned():
     if os.path.exists(file_path):
         with open(file_path, "r", encoding="utf-8") as f:
             lines = f.read().splitlines()
-        for line in lines[1:]:  # bỏ dòng tiêu đề
+        for line in lines[1:]:
             if "||" in line:
                 sentence, label = line.split("||", 1)
                 new_sentences.append(clean_text(sentence))
                 new_labels.append(label)
     return new_sentences, new_labels
 
-# ------------------ Hàm fuzzy match ------------------
-def fuzzy_match(sentence, choices, cutoff=0.8):
+# ------------------ Fuzzy match ------------------
+def fuzzy_match(sentence, choices, cutoff=0.6):
     matches = difflib.get_close_matches(sentence, choices, n=1, cutoff=cutoff)
     return matches[0] if matches else None
 
-# ------------------ Hàm lấy thông tin hệ thống ------------------
+# ------------------ Thông tin hệ thống ------------------
 def system_info():
     info = {}
     info['OS'] = f"{platform.system()} {platform.release()} ({platform.version()})"
@@ -98,12 +117,13 @@ vectorizer = TfidfVectorizer()
 X = vectorizer.fit_transform(training_sentences)
 model = MultinomialNB()
 model.fit(X, training_labels)
+
 print(f"✅ Mô hình đã được huấn luyện với {len(training_sentences)} câu, bao gồm {len(new_sentences)} câu chưa học")
 
 # ------------------ Routes ------------------
 @app.route("/")
 def home():
-    web_dir = r"E:\pycode\baocao\AI\web"
+    web_dir = r"E:\pycode\baocao\AI\web"  # Thư mục chứa index.html
     return send_from_directory(web_dir, "index.html")
 
 @app.route("/chat", methods=["POST"])
@@ -116,32 +136,35 @@ def chat():
     if math_result:
         return jsonify({"response": math_result})
 
-    # Kiểm tra thông tin thiết bị
+    # Kiểm tra thông tin hệ thống
     if any(keyword in user_input for keyword in ["thông tin máy", "cấu hình", "system info", "máy"]):
         info = system_info()
         reply = "\n".join([f"{k}: {v}" for k, v in info.items()])
         return jsonify({"response": reply})
 
     # Fuzzy match
-    match = fuzzy_match(user_input, training_sentences, cutoff=0.6)
+    match = fuzzy_match(user_input, training_sentences)
     if match:
         idx = training_sentences.index(match)
         predicted_label = training_labels[idx]
         reply = random.choice(responses.get(predicted_label, ["Mình chưa hiểu câu này."]))
     else:
+        # Dùng Naive Bayes dự đoán
         X_test = vectorizer.transform([user_input])
         probs = model.predict_proba(X_test)[0]
         max_prob = max(probs)
         predicted_label = model.classes_[probs.argmax()]
 
         if max_prob < 0.5:
-            reply = "Mình chưa hiểu câu này, bạn có thể nói lại không?"
-            log_unlearned(user_input)
+            # Gửi câu lên OpenAI
+            reply = ask_openai(user_input)
+
+            # Tự động gán nhãn tạm "openai" cho câu mới
+            log_unlearned(user_input, label="openai")
         else:
             reply = random.choice(responses.get(predicted_label, ["Mình chưa hiểu câu này."]))
-            # Nếu nhãn không có response, coi như chưa học
             if predicted_label not in responses:
-                log_unlearned(user_input)
+                log_unlearned(user_input, label=predicted_label)
 
     print(f"[DEBUG] input: {user_input}, label: {predicted_label}")
     return jsonify({"response": reply})
