@@ -23,13 +23,32 @@ app = Flask(__name__)
 # ------------------ Hàm xử lý văn bản ------------------
 def clean_text(text):
     return text.lower().strip()
-
+def detect_topic(cleaned_input):
+    for topic, keywords in topic_keywords.items():
+        for kw in keywords:
+            if kw in cleaned_input:
+                return topic
+    return None
 # ------------------ Dữ liệu offline ------------------
-training_sentences = [clean_text(s) for s in greeting.training_sentences
-                      + story.training_sentences
-                      + creator.training_sentences
-                      + bye.training_sentences]
-training_labels = ["offline"] * len(training_sentences)
+training_sentences = []
+training_labels = []
+
+# greeting
+training_sentences += [clean_text(s) for s in greeting.training_sentences]
+training_labels += ["greeting"] * len(greeting.training_sentences)
+
+# story
+training_sentences += [clean_text(s) for s in story.training_sentences]
+training_labels += ["story"] * len(story.training_sentences)
+
+# creator
+training_sentences += [clean_text(s) for s in creator.training_sentences]
+training_labels += ["creator"] * len(creator.training_sentences)
+
+# bye
+training_sentences += [clean_text(s) for s in bye.training_sentences]
+training_labels += ["bye"] * len(bye.training_sentences)
+
 responses = {}
 responses.update(greeting.responses)
 responses.update(story.responses)
@@ -105,25 +124,31 @@ model.fit(X, training_labels)
 print(f"✅ Mô hình offline đã được huấn luyện với {len(training_sentences)} câu, bao gồm {len(new_sentences)} câu chưa học")
 
 # ------------------ Fetch website theo topic ------------------
-topic_urls = {
-    "AI": ["https://en.wikipedia.org/wiki/Artificial_intelligence"],
-    "Toán học": ["https://en.wikipedia.org/wiki/Mathematics"],
-    "Lịch sử": ["https://en.wikipedia.org/wiki/History"],
-    "Thể thao": ["https://en.wikipedia.org/wiki/Sport"],
-    "Tin tức": ["https://en.wikipedia.org/wiki/World_news"]
+topic_keywords = {
+    "ai": ["ai", "trí tuệ nhân tạo", "artificial intelligence"],
+    "math": ["toán", "toán học", "math", "mathematics"],
+    "history": ["lịch sử", "history", "historical"],
+    "sports": ["thể thao", "bóng đá", "sports", "football"],
+    "world_news": ["tin tức", "thế giới", "news", "world news"]
 }
-
+topic_urls = {
+    "ai": ["https://en.wikipedia.org/wiki/Artificial_intelligence"],
+    "math": ["https://en.wikipedia.org/wiki/Mathematics"],
+    "history": ["https://en.wikipedia.org/wiki/History"],
+    "sports": ["https://en.wikipedia.org/wiki/Sport"],
+    "world_news": ["https://en.wikipedia.org/wiki/World_news"]
+}
 topic_chunks = {}       # lưu các đoạn văn theo topic
 topic_vectorizers = {}  # vectorizer riêng cho mỗi topic
 topic_X = {}            # ma trận TF-IDF cho mỗi topic
 
 def fetch_website_text(url):
     try:
-        res = requests.get(url, timeout=10)
+        res = requests.get(url, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
         soup = BeautifulSoup(res.text, "html.parser")
         text = soup.get_text(separator=" ")
         words = text.split()
-        chunk_size = 50
+        chunk_size = 150
         chunks = [" ".join(words[i:i+chunk_size]) for i in range(0, len(words), chunk_size)]
         return chunks
     except Exception as e:
@@ -153,21 +178,30 @@ def cosine_similarity(a, b):
     return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
 
 def answer_from_online_topics(question):
-    best_score = 0
-    best_answer = None
-    for topic, chunks in topic_chunks.items():
-        if not chunks or topic_X[topic] is None:
-            continue
-        q_vec = topic_vectorizers[topic].transform([question])
-        scores = (topic_X[topic] @ q_vec.T).toarray().ravel()
-        idx = np.argmax(scores)
-        score = scores[idx]
-        if score > best_score:
-            best_score = score
-            best_answer = chunks[idx]
+    cleaned = clean_text(question)
+    topic = detect_topic(cleaned)
+
+    if topic is None:
+        return "Mình chưa tìm được thông tin từ online."
+
+    chunks = topic_chunks.get(topic, [])
+    X_topic = topic_X.get(topic, None)
+    vectorizer_topic = topic_vectorizers.get(topic, None)
+
+    if not chunks or X_topic is None:
+        return "Mình chưa tìm được thông tin từ online."
+
+    q_vec = vectorizer_topic.transform([question])
+    scores = (X_topic @ q_vec.T).toarray().ravel()
+
+    idx = np.argmax(scores)
+    best_score = scores[idx]
+
     if best_score < 0.1:
         return "Mình chưa tìm được thông tin từ online."
-    return best_answer
+
+    return chunks[idx]
+
 
 # ------------------ Routes ------------------
 @app.route("/")
@@ -208,6 +242,7 @@ def chat():
 
         if max_prob < 0.5:
             # fallback: tìm trong online theo topic
+            log_unlearned(user_input, label="unknown")
             reply = answer_from_online_topics(user_input)
             log_unlearned(user_input, label="online")
         else:
