@@ -8,57 +8,35 @@ import platform
 import psutil
 import socket
 import getpass
-import openai
+import requests
+from bs4 import BeautifulSoup
+import numpy as np
 
 import greeting
 import creator
 import bye
 import story
 import math_logic
-import numpy as np
+
 app = Flask(__name__)
-
-# ------------------ Cấu hình OpenAI ------------------
-openai.api_key = "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"  # Thay bằng API key của bạn
-
-def ask_openai(message):
-    try:
-        response = openai.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": "Hello"}],
-            temperature=0.7,
-            max_tokens=200
-        )
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        print("Lỗi OpenAI:", e)
-        return "Xin lỗi, hiện tại mình không thể trả lời bằng AI."
 
 # ------------------ Hàm xử lý văn bản ------------------
 def clean_text(text):
     return text.lower().strip()
 
-# ------------------ Chuẩn bị dữ liệu ban đầu ------------------
+# ------------------ Dữ liệu offline ------------------
 training_sentences = [clean_text(s) for s in greeting.training_sentences
                       + story.training_sentences
                       + creator.training_sentences
                       + bye.training_sentences]
-training_labels = greeting.training_labels + story.training_labels + creator.training_labels + bye.training_labels
-
-# Đồng bộ số lượng câu và nhãn
-if len(training_sentences) != len(training_labels):
-    min_len = min(len(training_sentences), len(training_labels))
-    training_sentences = training_sentences[:min_len]
-    training_labels = training_labels[:min_len]
-
-# Gộp responses
+training_labels = ["offline"] * len(training_sentences)
 responses = {}
 responses.update(greeting.responses)
 responses.update(story.responses)
 responses.update(creator.responses)
 responses.update(bye.responses)
 
-# ------------------ Hàm log câu chưa học ------------------
+# ------------------ Log câu chưa học ------------------
 def log_unlearned(sentence: str, label="unknown"):
     sentence = sentence.strip()
     if not sentence:
@@ -74,7 +52,7 @@ def log_unlearned(sentence: str, label="unknown"):
             f.write(f"{sentence}||{label}\n")
         print(f"📝 Đã lưu câu mới vào unlearned.txt: {sentence}||{label}")
 
-# ------------------ Hàm nạp câu chưa học ------------------
+# ------------------ Nạp câu chưa học ------------------
 def load_unlearned():
     file_path = "unlearned.txt"
     new_sentences = []
@@ -108,51 +86,106 @@ def system_info():
     info['User'] = getpass.getuser()
     return info
 
-# ------------------ Nạp câu chưa học và huấn luyện mô hình ------------------
+# ------------------ Load câu chưa học và huấn luyện offline ------------------
 new_sentences, new_labels = load_unlearned()
 training_sentences += new_sentences
 training_labels += new_labels
 
+# Đồng bộ số lượng
+min_len = min(len(training_sentences), len(training_labels))
+training_sentences = training_sentences[:min_len]
+training_labels = training_labels[:min_len]
+
+# Huấn luyện mô hình Naive Bayes offline
 vectorizer = TfidfVectorizer()
 X = vectorizer.fit_transform(training_sentences)
 model = MultinomialNB()
 model.fit(X, training_labels)
 
-print(f"✅ Mô hình đã được huấn luyện với {len(training_sentences)} câu, bao gồm {len(new_sentences)} câu chưa học")
+print(f"✅ Mô hình offline đã được huấn luyện với {len(training_sentences)} câu, bao gồm {len(new_sentences)} câu chưa học")
 
-def get_embedding(text: str):
+# ------------------ Fetch website theo topic ------------------
+topic_urls = {
+    "AI": ["https://en.wikipedia.org/wiki/Artificial_intelligence"],
+    "Toán học": ["https://en.wikipedia.org/wiki/Mathematics"],
+    "Lịch sử": ["https://en.wikipedia.org/wiki/History"],
+    "Thể thao": ["https://en.wikipedia.org/wiki/Sport"],
+    "Tin tức": ["https://en.wikipedia.org/wiki/World_news"]
+}
+
+topic_chunks = {}       # lưu các đoạn văn theo topic
+topic_vectorizers = {}  # vectorizer riêng cho mỗi topic
+topic_X = {}            # ma trận TF-IDF cho mỗi topic
+
+def fetch_website_text(url):
     try:
-        response = openai.embeddings.create(
-            model="text-embedding-3-small",
-            input=text
-        )
-        return response.data[0].embedding
+        res = requests.get(url, timeout=10)
+        soup = BeautifulSoup(res.text, "html.parser")
+        text = soup.get_text(separator=" ")
+        words = text.split()
+        chunk_size = 50
+        chunks = [" ".join(words[i:i+chunk_size]) for i in range(0, len(words), chunk_size)]
+        return chunks
     except Exception as e:
-        print("Lỗi embedding:", e)
-        return None
+        print("❌ Lỗi khi đọc website:", e)
+        return []
 
-# Tạo vector embedding cho toàn bộ câu huấn luyện
-training_embeddings = [get_embedding(s) for s in training_sentences]
+# Fetch từng topic
+for topic, urls in topic_urls.items():
+    all_chunks = []
+    for url in urls:
+        chunks = fetch_website_text(url)
+        all_chunks += chunks
+    topic_chunks[topic] = all_chunks
+    vectorizer_topic = TfidfVectorizer()
+    if all_chunks:
+        X_topic = vectorizer_topic.fit_transform(all_chunks)
+    else:
+        X_topic = None
+    topic_vectorizers[topic] = vectorizer_topic
+    topic_X[topic] = X_topic
+    print(f"[INFO] Topic '{topic}' nạp {len(all_chunks)} chunks.")
 
+# ------------------ Cosine similarity ------------------
 def cosine_similarity(a, b):
     a = np.array(a)
     b = np.array(b)
     return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+
+def answer_from_online_topics(question):
+    best_score = 0
+    best_answer = None
+    for topic, chunks in topic_chunks.items():
+        if not chunks or topic_X[topic] is None:
+            continue
+        q_vec = topic_vectorizers[topic].transform([question])
+        scores = (topic_X[topic] @ q_vec.T).toarray().ravel()
+        idx = np.argmax(scores)
+        score = scores[idx]
+        if score > best_score:
+            best_score = score
+            best_answer = chunks[idx]
+    if best_score < 0.1:
+        return "Mình chưa tìm được thông tin từ online."
+    return best_answer
+
 # ------------------ Routes ------------------
 @app.route("/")
 def home():
-    web_dir = r"D:\git\AI_chat_box\baocao\AI\web"  # Thư mục chứa index.html
+    web_dir = r"D:\git\AI_chat_box\baocao\AI\web"
     return send_from_directory(web_dir, "index.html")
 
 @app.route("/chat", methods=["POST"])
 def chat():
     data = request.get_json()
     user_input = clean_text(data.get("message", ""))
+    reply = "Mình chưa hiểu câu này."  # default fallback
 
     # Kiểm tra toán học
     math_result = math_logic.try_math(user_input)
     if math_result:
-        return jsonify({"response": math_result})
+        reply = math_result
+        return jsonify({"response": reply})
 
     # Kiểm tra thông tin hệ thống
     if any(keyword in user_input for keyword in ["thông tin máy", "cấu hình", "system info", "máy"]):
@@ -160,27 +193,27 @@ def chat():
         reply = "\n".join([f"{k}: {v}" for k, v in info.items()])
         return jsonify({"response": reply})
 
-    # --- Sử dụng embedding để tìm câu gần nhất ---
-    user_emb = get_embedding(user_input)
-    if user_emb:
-        scores = [cosine_similarity(user_emb, emb) for emb in training_embeddings]
-        best_idx = int(np.argmax(scores))
-        best_score = scores[best_idx]
-
-        if best_score < 0.75:
-            reply = ask_openai(user_input)
-            log_unlearned(user_input, label="openai")
-        else:
-            predicted_label = training_labels[best_idx]
-            reply = random.choice(responses.get(predicted_label, ["Mình chưa hiểu câu này."]))
-            if predicted_label not in responses:
-                log_unlearned(user_input, label=predicted_label)
+    # --- Offline: Fuzzy match ---
+    match = fuzzy_match(user_input, training_sentences)
+    if match:
+        idx = training_sentences.index(match)
+        predicted_label = training_labels[idx]
+        reply = random.choice(responses.get(predicted_label, [reply]))
     else:
-        # fallback nếu embedding lỗi
-        reply = ask_openai(user_input)
-        log_unlearned(user_input, label="openai")
+        # Dùng Naive Bayes dự đoán
+        X_test = vectorizer.transform([user_input])
+        probs = model.predict_proba(X_test)[0]
+        max_prob = max(probs)
+        predicted_label = model.classes_[probs.argmax()]
 
-    print(f"[DEBUG] input: {user_input}, similarity: {best_score if user_emb else 'N/A'}, label: {predicted_label if user_emb else 'openai'}")
+        if max_prob < 0.5:
+            # fallback: tìm trong online theo topic
+            reply = answer_from_online_topics(user_input)
+            log_unlearned(user_input, label="online")
+        else:
+            reply = random.choice(responses.get(predicted_label, [reply]))
+
+    print(f"[DEBUG] input: {user_input}, label: {predicted_label}")
     return jsonify({"response": reply})
 
 # ------------------ Chạy server ------------------
