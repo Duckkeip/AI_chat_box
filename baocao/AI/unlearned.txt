@@ -10,3 +10,5 @@ cho tôi công thức tính chu vi hình chữ nhật
 bạn có biết học tập không
 mạng thì sao||unknown
 mạng wifi ấy||unknown
+alo||openai
+là sao||openai

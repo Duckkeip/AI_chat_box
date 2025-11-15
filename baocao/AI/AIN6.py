@@ -15,7 +15,7 @@ import creator
 import bye
 import story
 import math_logic
-
+import numpy as np
 app = Flask(__name__)
 
 # ------------------ Cấu hình OpenAI ------------------
@@ -23,9 +23,9 @@ openai.api_key = "sk-proj-23QfqFPUCRQw9FmANzn5RRysb6_5QSUvaVE5Kqn1S9tecPPuYD8FpA
 
 def ask_openai(message):
     try:
-        response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",  # hoặc "gpt-4"
-            messages=[{"role": "user", "content": message}],
+        response = openai.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": "Hello"}],
             temperature=0.7,
             max_tokens=200
         )
@@ -120,10 +120,28 @@ model.fit(X, training_labels)
 
 print(f"✅ Mô hình đã được huấn luyện với {len(training_sentences)} câu, bao gồm {len(new_sentences)} câu chưa học")
 
+def get_embedding(text: str):
+    try:
+        response = openai.embeddings.create(
+            model="text-embedding-3-small",
+            input=text
+        )
+        return response.data[0].embedding
+    except Exception as e:
+        print("Lỗi embedding:", e)
+        return None
+
+# Tạo vector embedding cho toàn bộ câu huấn luyện
+training_embeddings = [get_embedding(s) for s in training_sentences]
+
+def cosine_similarity(a, b):
+    a = np.array(a)
+    b = np.array(b)
+    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
 # ------------------ Routes ------------------
 @app.route("/")
 def home():
-    web_dir = r"E:\pycode\baocao\AI\web"  # Thư mục chứa index.html
+    web_dir = r"D:\git\AI_chat_box\baocao\AI\web"  # Thư mục chứa index.html
     return send_from_directory(web_dir, "index.html")
 
 @app.route("/chat", methods=["POST"])
@@ -142,31 +160,27 @@ def chat():
         reply = "\n".join([f"{k}: {v}" for k, v in info.items()])
         return jsonify({"response": reply})
 
-    # Fuzzy match
-    match = fuzzy_match(user_input, training_sentences)
-    if match:
-        idx = training_sentences.index(match)
-        predicted_label = training_labels[idx]
-        reply = random.choice(responses.get(predicted_label, ["Mình chưa hiểu câu này."]))
-    else:
-        # Dùng Naive Bayes dự đoán
-        X_test = vectorizer.transform([user_input])
-        probs = model.predict_proba(X_test)[0]
-        max_prob = max(probs)
-        predicted_label = model.classes_[probs.argmax()]
+    # --- Sử dụng embedding để tìm câu gần nhất ---
+    user_emb = get_embedding(user_input)
+    if user_emb:
+        scores = [cosine_similarity(user_emb, emb) for emb in training_embeddings]
+        best_idx = int(np.argmax(scores))
+        best_score = scores[best_idx]
 
-        if max_prob < 0.5:
-            # Gửi câu lên OpenAI
+        if best_score < 0.75:
             reply = ask_openai(user_input)
-
-            # Tự động gán nhãn tạm "openai" cho câu mới
             log_unlearned(user_input, label="openai")
         else:
+            predicted_label = training_labels[best_idx]
             reply = random.choice(responses.get(predicted_label, ["Mình chưa hiểu câu này."]))
             if predicted_label not in responses:
                 log_unlearned(user_input, label=predicted_label)
+    else:
+        # fallback nếu embedding lỗi
+        reply = ask_openai(user_input)
+        log_unlearned(user_input, label="openai")
 
-    print(f"[DEBUG] input: {user_input}, label: {predicted_label}")
+    print(f"[DEBUG] input: {user_input}, similarity: {best_score if user_emb else 'N/A'}, label: {predicted_label if user_emb else 'openai'}")
     return jsonify({"response": reply})
 
 # ------------------ Chạy server ------------------
