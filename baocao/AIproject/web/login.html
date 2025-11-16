@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Đăng nhập - Chatbot N6</title>
+    <style>
+        /* CSS cho giao diện Đen/Trắng, Tối giản */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            /* Màu nền xám nhạt, không còn màu tím */
+            background: #f0f0f0;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .login-container {
+            background: white;
+            border-radius: 12px;
+            /* Shadow nhẹ nhàng hơn */
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            padding: 40px;
+            width: 90%;
+            max-width: 400px;
+        }
+        .logo {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .logo h1 {
+            /* Đổi tên và màu sắc */
+            color: #202123;
+            font-size: 32px;
+            margin-bottom: 5px;
+            font-weight: 700;
+        }
+        .logo p {
+            color: #6c757d;
+            font-size: 14px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #202123;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        .form-group input {
+            width: 100%;
+            padding: 12px 15px;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 15px;
+            transition: all 0.3s;
+            font-family: inherit;
+        }
+        .form-group input:focus {
+            outline: none;
+            /* Màu nhấn đồng bộ với chat UI */
+            border-color: #a8d5e2;
+            box-shadow: 0 0 0 3px rgba(168, 213, 226, 0.3);
+        }
+        .btn {
+            width: 100%;
+            padding: 14px;
+            /* Màu nền đồng bộ */
+            background: #a8d5e2;
+            color: #202123;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-bottom: 15px;
+            box-shadow: 0 4px 10px rgba(168, 213, 226, 0.4);
+        }
+        .btn:hover {
+            background: #90c2cf;
+            box-shadow: 0 6px 15px rgba(168, 213, 226, 0.5);
+        }
+        .btn:disabled {
+            background: #e0e0e0;
+            color: #a0a0a0;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        .btn-secondary {
+            background: white;
+            color: #202123;
+            border: 1px solid #dcdcdc;
+            box-shadow: none;
+        }
+        .btn-secondary:hover {
+            background: #f8f8f8;
+            box-shadow: none;
+        }
+        .divider {
+            text-align: center;
+            margin: 25px 0;
+            color: #6c757d;
+            font-size: 14px;
+            position: relative;
+        }
+        .divider::before,
+        .divider::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            width: 40%;
+            height: 1px;
+            background: #e0e0e0;
+        }
+        .divider::before {
+            left: 0;
+        }
+        .divider::after {
+            right: 0;
+        }
+        .error-message {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            display: none;
+            border: 1px solid #f5c6cb;
+        }
+        .success-message {
+            background: #d4edda;
+            color: #155724;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            display: none;
+            border: 1px solid #c3e6cb;
+        }
+        .toggle-form {
+            text-align: center;
+            margin-top: 20px;
+            color: #6c757d;
+            font-size: 14px;
+        }
+        .toggle-form a {
+            /* Màu link đồng bộ */
+            color: #a8d5e2;
+            text-decoration: none;
+            font-weight: 600;
+        }
+        .toggle-form a:hover {
+            text-decoration: underline;
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+        .loading::after {
+            content: '⏳';
+            font-size: 32px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="logo">
+            <h1>🤖 Chatbot N6</h1>
+            <p>Chatbot thông minh với Hybrid AI</p>
+        </div>
+
+        <div id="errorMessage" class="error-message"></div>
+        <div id="successMessage" class="success-message"></div>
+        <div id="loading" class="loading"></div>
+
+        <form id="loginForm">
+            <div class="form-group">
+                <label for="loginEmail">Email</label>
+                <input type="email" id="loginEmail" required placeholder="your@email.com">
+            </div>
+            <div class="form-group">
+                <label for="loginPassword">Mật khẩu</label>
+                <input type="password" id="loginPassword" required placeholder="••••••••">
+            </div>
+            <button type="submit" class="btn">Đăng nhập</button>
+        </form>
+
+        <div class="divider">HOẶC</div>
+
+        <form id="registerForm" style="display: none;">
+            <div class="form-group">
+                <label for="registerName">Tên của bạn</label>
+                <input type="text" id="registerName" required placeholder="Nguyễn Văn A">
+            </div>
+            <div class="form-group">
+                <label for="registerEmail">Email</label>
+                <input type="email" id="registerEmail" required placeholder="your@email.com">
+            </div>
+            <div class="form-group">
+                <label for="registerPassword">Mật khẩu</label>
+                <input type="password" id="registerPassword" required placeholder="••••••••" minlength="6">
+            </div>
+            <button type="submit" class="btn">Đăng ký</button>
+        </form>
+
+        <div class="toggle-form">
+            <span id="toggleText">Chưa có tài khoản?</span>
+            <a href="#" id="toggleLink">Đăng ký ngay</a>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js';
+        import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js';
+
+        // Cấu hình Firebase (Thay bằng config của bạn)
+        const firebaseConfig = {
+            apiKey: "AIzaSyCdL3GxcWzyLbbMlEP4ToVPe0dSPR5ViyE",
+            authDomain: "chatbotn6-de9f1.firebaseapp.com",
+            projectId: "chatbotn6-de9f1",
+            storageBucket: "chatbotn6-de9f1.firebasestorage.app",
+            messagingSenderId: "15539268426",
+            appId: "1:15539268426:web:cbeb707dfd5d4354f5efb3",
+            measurementId: "G-0PGB5CKS5Z"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+
+        const loginForm = document.getElementById('loginForm');
+        const registerForm = document.getElementById('registerForm');
+        const toggleLink = document.getElementById('toggleLink');
+        const toggleText = document.getElementById('toggleText');
+        const errorMessage = document.getElementById('errorMessage');
+        const successMessage = document.getElementById('successMessage');
+        const loading = document.getElementById('loading');
+
+        let isLoginMode = true;
+
+        // Toggle giữa đăng nhập và đăng ký
+        toggleLink.addEventListener('click', (e) => {
+            e.preventDefault();
+            isLoginMode = !isLoginMode;
+
+            if (isLoginMode) {
+                loginForm.style.display = 'block';
+                registerForm.style.display = 'none';
+                toggleText.textContent = 'Chưa có tài khoản?';
+                toggleLink.textContent = 'Đăng ký ngay';
+            } else {
+                loginForm.style.display = 'none';
+                registerForm.style.display = 'block';
+                toggleText.textContent = 'Đã có tài khoản?';
+                toggleLink.textContent = 'Đăng nhập';
+            }
+            hideMessages();
+        });
+
+        // Xử lý đăng nhập
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+
+            showLoading();
+            hideMessages();
+
+            try {
+                const userCredential = await signInWithEmailAndPassword(auth, email, password);
+                const user = userCredential.user;
+
+                // Lưu thông tin user vào localStorage
+                const idToken = await user.getIdToken();
+                localStorage.setItem('userToken', idToken);
+                localStorage.setItem('userId', user.uid);
+                localStorage.setItem('userEmail', user.email);
+                localStorage.setItem('userName', user.displayName || user.email.split('@')[0]);
+
+                showSuccess('Đăng nhập thành công! Đang chuyển trang...');
+                setTimeout(() => {
+                    window.location.href = '/';
+                }, 1000);
+            } catch (error) {
+                hideLoading();
+                showError(getErrorMessage(error.code));
+            }
+        });
+
+        // Xử lý đăng ký
+        registerForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const name = document.getElementById('registerName').value;
+            const email = document.getElementById('registerEmail').value;
+            const password = document.getElementById('registerPassword').value;
+
+            showLoading();
+            hideMessages();
+
+            try {
+                const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+                const user = userCredential.user;
+
+                // Cập nhật tên người dùng
+                await updateProfile(user, {
+                    displayName: name
+                });
+
+                // Lưu thông tin user
+                const idToken = await user.getIdToken();
+                localStorage.setItem('userToken', idToken);
+                localStorage.setItem('userId', user.uid);
+                localStorage.setItem('userEmail', user.email);
+                localStorage.setItem('userName', name);
+
+                showSuccess('Đăng ký thành công! Đang chuyển trang...');
+                setTimeout(() => {
+                    window.location.href = '/';
+                }, 1000);
+            } catch (error) {
+                hideLoading();
+                showError(getErrorMessage(error.code));
+            }
+        });
+
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorMessage.style.display = 'block';
+        }
+
+        function showSuccess(message) {
+            successMessage.textContent = message;
+            successMessage.style.display = 'block';
+        }
+
+        function hideMessages() {
+            errorMessage.style.display = 'none';
+            successMessage.style.display = 'none';
+        }
+
+        function showLoading() {
+            loading.style.display = 'block';
+            loginForm.style.display = 'none';
+            registerForm.style.display = 'none';
+        }
+
+        function hideLoading() {
+            loading.style.display = 'none';
+            if (isLoginMode) {
+                loginForm.style.display = 'block';
+            } else {
+                registerForm.style.display = 'block';
+            }
+        }
+
+        function getErrorMessage(errorCode) {
+            switch (errorCode) {
+                case 'auth/email-already-in-use':
+                    return 'Email này đã được sử dụng!';
+                case 'auth/invalid-email':
+                    return 'Email không hợp lệ!';
+                case 'auth/weak-password':
+                    return 'Mật khẩu quá yếu! Vui lòng dùng ít nhất 6 ký tự.';
+                case 'auth/user-not-found':
+                    return 'Không tìm thấy tài khoản này!';
+                case 'auth/wrong-password':
+                    return 'Mật khẩu không đúng!';
+                case 'auth/too-many-requests':
+                    return 'Quá nhiều lần thử! Vui lòng thử lại sau.';
+                default:
+                    return 'Có lỗi xảy ra: ' + errorCode;
+            }
+        }
+
+        // Kiểm tra nếu đã đăng nhập
+        if (localStorage.getItem('userToken')) {
+            window.location.href = '/';
+        }
+    </script>
+</body>
+</html>
